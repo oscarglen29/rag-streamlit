@@ -1,4 +1,4 @@
-"""Interfaz de prueba RAG. No ejecuta ni modifica los cuadernos."""
+"""Interfaz de prueba RAG OEFA. No ejecuta ni modifica los cuadernos."""
 import json
 import os
 import re
@@ -26,7 +26,7 @@ def leer(path):
 class Motor:
     def __init__(self):
         self.lock = threading.Lock()
-        self.log = (ROOT/'motor.log').open('a',encoding='utf-8')
+        self.log = sys.stderr  # Diagnósticos disponibles en los logs de Streamlit Cloud
         self.proceso = subprocess.Popen([PYTHON_MOTOR,'-u',str(ROOT/'motor.py')],stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,stderr=self.log,text=True,encoding='utf-8',env={**os.environ,'PYTHONIOENCODING':'utf-8','ANONYMIZED_TELEMETRY':'False'})
     def buscar(self, parametros):

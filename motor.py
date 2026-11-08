@@ -3,6 +3,7 @@ import contextlib
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -56,4 +57,5 @@ if __name__=='__main__':
                 resultado = buscar(json.loads(linea))
             print(json.dumps({'ok':True,'resultado':resultado},ensure_ascii=False),flush=True)
         except Exception as exc:
+            traceback.print_exc(file=sys.stderr)
             print(json.dumps({'ok':False,'error':f'{type(exc).__name__}: {exc}'},ensure_ascii=False),flush=True)
