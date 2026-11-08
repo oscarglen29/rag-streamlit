@@ -1,4 +1,4 @@
-"""Interfaz de prueba RAG"""
+"""Interfaz de prueba RAG OEFA. No ejecuta ni modifica los cuadernos."""
 import json
 import os
 import re
@@ -15,7 +15,7 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 HISTORIAL = ROOT / 'historial'
-PYTHON_MOTOR = os.environ.get('OEFA_PYTHON_MOTOR', r'C:\Users\carri\Jupyter\.venv\Scripts\python.exe')
+PYTHON_MOTOR = os.environ.get('OEFA_PYTHON_MOTOR', sys.executable)
 
 def nombre_version(version):
     return {'v5': 'V1', 'v6': 'V2'}.get(version, version.upper())
@@ -80,14 +80,17 @@ def mostrar(registro):
             if e.get('contexto_hechos'):
                 st.markdown('**Contexto asociado por reglas (V1)**')
                 st.text(e['contexto_hechos'])
-            st.caption(f"PDF: {e['pdf_local']}\nSHA-256: {e['sha256_pdf']}")
+            st.caption(f"SHA-256: {e['sha256_pdf']}")
             st.json({k:v for k,v in e.items() if k not in ('texto','contexto_hechos','pdf_local','sha256_pdf')},expanded=False)
+    registro = json.loads(json.dumps(registro,ensure_ascii=False))
+    for evidencia in registro.get('evidencias', []):
+        evidencia.pop('pdf_local', None)
     st.download_button('Descargar esta prueba',json.dumps(registro,ensure_ascii=False,indent=2),
         file_name=registro['id']+'.json',mime='application/json',key='descarga_'+registro['id'])
 
 st.set_page_config(page_title='Buscador de resoluciones jurídicas',page_icon='🔎',layout='wide')
 st.title('Buscador de resoluciones jurídicas')
-st.caption('Prueba local - consulta, observa las evidencias y compara las versiones 1 y 2 del modelo RAG')
+st.caption('Piloto - consulta, observa las evidencias y compara las versiones 1 y 2 del modelo RAG')
 with st.sidebar:
     st.header('Configura tu prueba')
     version = st.selectbox('Versión',['v6','v5'],format_func=lambda v: nombre_version(v)+(' · páginas directas' if v=='v6' else ' · contexto por hecho'))
@@ -99,13 +102,15 @@ with st.sidebar:
     resoluciones = {int(p['id_resolucion']):p['resolucion'] for p in paginas}
     filtro = st.selectbox('Resolución',[None]+sorted(resoluciones),format_func=lambda x:'Todas las resoluciones' if x is None else f'{resoluciones[x]} · ID {x}')
     st.caption('Este selector aplica un filtro real. Escribir un número en la pregunta no restringe automáticamente la búsqueda.')
-    modo = st.radio('Modo',['Solo buscar','Buscar y responder con Qwen'])
+    habilitar_qwen = os.environ.get('OEFA_ENABLE_QWEN', 'false').lower() == 'true'
+    modo = st.radio('Modo',['Solo buscar','Buscar y responder con Qwen'] if habilitar_qwen else ['Solo buscar'])
     top_k = st.slider('Cantidad de evidencias',1,20,5)
     with st.expander('Conexión y generación'):
-        url = st.text_input('Servidor local de Qwen','http://localhost:1235/v1')
+        url = os.environ.get('OEFA_LLM_URL', 'http://localhost:1235/v1')
+        st.caption('La conexión a Qwen la configura quien administra la aplicación.')
         modelo = st.text_input('Identificador del modelo','qwen3.5-4b')
         limite = st.number_input('Máximo de tokens de respuesta',min_value=200,max_value=8000,value=1600,step=200)
-        if st.button('Comprobar conexión'):
+        if habilitar_qwen and st.button('Comprobar conexión'):
             try:
                 r = requests.get(url.rstrip('/')+'/models',timeout=5)
                 r.raise_for_status()
@@ -113,7 +118,7 @@ with st.sidebar:
                 st.json([m['id'] for m in r.json().get('data',[])])
             except Exception as exc:
                 st.error(f'No se pudo conectar: {exc}')
-    st.caption('V1 y V2 usan las mismas instrucciones de respuesta en esta aplicación. El historial guarda los parámetros y la petición enviada.')
+    st.caption('V1 y V2 usan las mismas instrucciones de respuesta en esta aplicación. El historial de sesión guarda los parámetros y la petición enviada.')
 
 consulta_tab,historial_tab = st.tabs(['Consulta','Historial de pruebas'])
 with consulta_tab:
@@ -141,25 +146,19 @@ with consulta_tab:
             except Exception as exc:
                 registro['error'] = str(exc)
             registro['segundos'] = time.perf_counter()-inicio
-            try:
-                HISTORIAL.mkdir(exist_ok=True)
-                with (HISTORIAL/(registro['id']+'.json')).open('x',encoding='utf-8') as f:
-                    json.dump(registro,f,ensure_ascii=False,indent=2)
-            except OSError as exc:
-                st.error(f'No se pudo guardar la prueba: {exc}. Puedes descargarla debajo.')
+            st.session_state.setdefault('historial_pruebas', []).append(registro)
             st.session_state['ultima_prueba'] = registro
     if 'ultima_prueba' in st.session_state:
         mostrar(st.session_state['ultima_prueba'])
 with historial_tab:
-    st.caption('Cada consulta se conserva en un archivo independiente, incluidos errores y búsquedas sin Qwen. No se sobrescriben las consultas de los cuadernos.')
-    archivos = sorted(HISTORIAL.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True) if HISTORIAL.exists() else []
-    if archivos:
-        registros = [json.loads(p.read_text(encoding='utf-8')) for p in archivos]
+    st.caption('Historial privado de esta sesión. Descárgalo antes de cerrar; no se conserva de forma permanente.')
+    registros = list(reversed(st.session_state.get('historial_pruebas', [])))
+    if registros:
         st.dataframe([dict(fecha=r['fecha'],version=nombre_version(r['version']),modo=r['modo'],pregunta=r['pregunta'],estado='Error' if r.get('error') else 'Completada') for r in registros],hide_index=True,use_container_width=True)
         elegido = st.selectbox('Revisar una prueba',range(len(registros)),format_func=lambda i:f"{nombre_version(registros[i]['version'])} · {registros[i]['pregunta'][:100]} · {registros[i]['fecha']}")
         # Claves distintas si la misma prueba también está en la pestaña Consulta.
         copia = dict(registros[elegido]); copia['id'] += '_historial'
         mostrar(copia)
-        st.download_button('Descargar todo el historial',json.dumps(registros,ensure_ascii=False,indent=2),'historial_rag_oefa.json','application/json')
+        st.download_button('Descargar todo el historial',json.dumps([{**r, 'evidencias': [{k:v for k,v in e.items() if k != 'pdf_local'} for e in r.get('evidencias', [])]} for r in registros],ensure_ascii=False,indent=2),'historial_rag_oefa.json','application/json')
     else:
         st.write('Todavía no hay pruebas guardadas.')
