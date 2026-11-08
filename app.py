@@ -1,4 +1,4 @@
-"""Interfaz de prueba RAG OEFA. No ejecuta ni modifica los cuadernos."""
+"""Interfaz de prueba RAG"""
 import json
 import os
 import re
