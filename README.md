@@ -1,4 +1,4 @@
-# RAG OEFA
+# Proyecto RAG 
 
 Aplicación desarrollada en Python y Streamlit para la consulta y análisis de resoluciones administrativas mediante técnicas de recuperación aumentada por generación (RAG).
 
